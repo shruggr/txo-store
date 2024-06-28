@@ -2,7 +2,7 @@ import { MerklePath, Transaction } from "@bsv/sdk";
 import type { Indexer } from "./models/indexer";
 import type { IndexContext } from "./models/index-context";
 import { openDB, type DBSchema, type IDBPDatabase } from "@tempfix/idb";
-import { Txo } from "./models/txo";
+import { Txo, TxoLookup, type TxoResults } from "./models/txo";
 import { TxnStatus, type Txn } from "./models/txn";
 import { BlockHeaderService } from "./block-headers";
 import type { Block } from "./models/block";
@@ -15,6 +15,7 @@ export interface TxoSchema extends DBSchema {
         value: Txo
         indexes: {
             events: string
+            owner: string
         }
     }
     txns: {
@@ -34,6 +35,7 @@ export class TxoStore {
             upgrade(db) {
                 const txos = db.createObjectStore('txos', { keyPath: ['txid', 'vout'] })
                 txos.createIndex('events', 'events', { multiEntry: true })
+                txos.createIndex('owner', 'owner')
                 db.createObjectStore('txns', { keyPath: 'txid' })
             }
         })
@@ -56,10 +58,10 @@ export class TxoStore {
         ]);
         const tx = Transaction.fromBinary(Array.from(new Uint8Array(rawtx)));
         tx.merklePath = MerklePath.fromBinary(Array.from(new Uint8Array(proof)));
-        txn = { 
+        txn = {
             txid,
-            rawtx: new Uint8Array(rawtx), 
-            proof: new Uint8Array(proof), 
+            rawtx: new Uint8Array(rawtx),
+            proof: new Uint8Array(proof),
             block: {
                 height: tx.merklePath.blockHeight,
                 idx: BigInt(tx.merklePath.path[0].find(p => p.hash == txid)?.offset || 0)
@@ -74,10 +76,21 @@ export class TxoStore {
         return (await this.db).get('txos', [txid, vout])
     }
 
-    async findTxos(indexer: string, id: string, value?: string, spent?: boolean): Promise<Txo[]> {
-        const dbkey = Txo.buildQueryKey(indexer, id, value, spent)
-        const txos = await (await this.db).getAllFromIndex('txos', 'events', IDBKeyRange.bound(dbkey, dbkey + '\uffff', true, false))
-        return txos.map(d => Txo.fromObject(d))
+    async findTxos(lookup: TxoLookup, limit = 100, from?: string): Promise<TxoResults> {
+        const db = await this.db
+        let dbkey = lookup.toQueryKey()
+        const start = from || dbkey
+        const query: IDBKeyRange = IDBKeyRange.bound(start, dbkey + '\uffff', true, false)
+        const results: TxoResults = { txos: [] }
+        for await (const cursor of db.transaction('txos').store.index('events').iterate(query)) {
+            const txo = Txo.fromObject(cursor.value)
+            results.nextPage = cursor.key
+            if (lookup.owner && txo.owner != lookup.owner) continue
+            results.txos.push(txo)
+            if (results.txos.length >= limit) return results
+        }
+        delete results.nextPage
+        return results
     }
 
     async ingest(tx: Transaction, fromRemote = false): Promise<IndexContext> {
@@ -116,7 +129,6 @@ export class TxoStore {
         }
 
         const t = (await this.db).transaction('txos', 'readwrite')
-
         for await (const [vin, input] of tx.inputs.entries()) {
             let data = await t.store.get([input.sourceTXID!, input.sourceOutputIndex])
             const spend = data ?
@@ -130,12 +142,12 @@ export class TxoStore {
 
             spend.spend = { txid, vin, block }
             ctx.spends.push(spend)
-            t.store.put(spend.index())
+            t.store.put(spend)
         }
 
         for await (const [vout, output] of tx.outputs.entries()) {
             let data = await t.store.get([txid, vout])
-            let txo = data ? 
+            let txo = data ?
                 Txo.fromObject(data) :
                 new Txo(
                     txid,
@@ -144,16 +156,18 @@ export class TxoStore {
                     BigInt(output.satoshis!)
                 )
             txo.block = block
+            txo.events = [];
             ctx.txos.push(txo)
             this.indexers.forEach(i => {
-                const data = i.parse(ctx, vout)
+                const data = i.parse && i.parse(ctx, vout)
                 if (data) {
                     txo.data[i.tag] = data
                 }
             })
-            if (Object.keys(txo.data).length) {
-                t.store.put(txo.index())
-            }
+        }
+        this.indexers.forEach(i => i.save && i.save(ctx))
+        for (const txo of ctx.txos) {
+            t.store.put(txo)
         }
         await t.done
         return ctx

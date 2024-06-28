@@ -6,6 +6,7 @@ import { Buffer } from 'buffer'
 export class Txo {
     block?: Block
     spend?: Spend
+    owner = ''
     data: { [tag: string]: IndexData } = {}
     events: string[] = []
 
@@ -15,26 +16,6 @@ export class Txo {
         public script: Uint8Array,
         public satoshis: bigint
     ) { }
-
-    index(): Txo {
-        this.events = []
-        for (const [tag, data] of Object.entries(this.data)) {
-            for (const e of data.events) {
-                const spent = this.spend ? '1' : '0'
-                const sort = this.spend?.block?.height || this.block?.height || Date.now()
-                const event = `${tag}:${e.id}:${e.value}:${spent}:${sort.toString(16).padStart(8, '0')}:${this.txid}:${this.vout}`
-                this.events.push(event)
-            }
-        }
-        return this
-    }
-
-    static buildQueryKey(tag: string, id: string, value?: string, spent?: boolean): string {
-        let key = `${tag}:${id}`
-        if (value) key += `:${value}` +
-           spent !== undefined ? `:${spent ? '1' : '0'}` : ''   
-        return key
-    }
 
     static fromObject(obj: any): Txo {
         const txo = new Txo(obj.txid, obj.vout, obj.script, BigInt(obj.satoshis))
@@ -64,10 +45,43 @@ export class Txo {
                     idx: this.spend?.block?.idx.toString(),
                     hash: this.spend?.block?.hash,
                 },
-            
+
             },
             data: this.data,
             events: this.events,
         }
     }
+}
+
+export class TxoLookup {
+    constructor(
+        public indexer: string, 
+        public id?: string,
+        public value?: string,
+        public spent?: boolean, 
+        public owner?: string) {
+    }
+
+    toQueryKey(): string {
+        return TxoLookup.buildQueryKey(this.indexer, this.id, this.value, this.spent)
+    }
+
+    static buildQueryKey(tag: string, id?: string, value?: string, spent?: boolean): string {
+        let key = `${tag}`
+        if (id) {
+            key += `:${id}`
+            if (value) {
+                key += `:${value}`
+                if (spent !== undefined) {
+                    key += `:${spent ? '1' : '0'}`
+                }
+            }
+        }
+        return key
+    }
+}
+
+export interface TxoResults {
+    txos: Txo[]
+    nextPage?: string
 }
