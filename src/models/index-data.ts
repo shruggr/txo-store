@@ -1,8 +1,10 @@
 import type { Event } from "./event"
 
 export class IndexData {
-    ids: string[] = []
-    events: Event[] = []
-    data: ArrayBuffer = new ArrayBuffer(0)
-    deps: ArrayBuffer[] = []
+    tag?: string
+    constructor(
+        public data: any = null,
+        public events: Event[] = [],
+        public deps = new Set<string>()
+    ) {}
 }

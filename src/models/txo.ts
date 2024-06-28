@@ -1,55 +1,73 @@
 import type { Block } from "./block"
-import type { IndexData } from "./index-data"
-import { Outpoint } from "./outpoint"
+import { IndexData } from "./index-data"
 import type { Spend } from "./spend"
+import { Buffer } from 'buffer'
 
 export class Txo {
-    outpoint: Outpoint
-    script: Uint8Array
-    satoshis: bigint
     block?: Block
     spend?: Spend
-    data: {[key: string]: IndexData} = {}
-    private _score?: Uint8Array
+    data: { [tag: string]: IndexData } = {}
+    events: string[] = []
 
-    constructor(outpoint: Outpoint, script: Uint8Array, satoshis: bigint) {
-        this.outpoint = outpoint
-        this.script = script
-        this.satoshis = satoshis
-    }
+    constructor(
+        public txid: string,
+        public vout: number,
+        public script: Uint8Array,
+        public satoshis: bigint
+    ) { }
 
-    get score() {
-        if (!this._score) {
-            this._score = new Uint8Array(12)
-            const view = new DataView(this._score.buffer)
-            view.setUint32(0, this.spend?.block?.height || this.block?.height || Date.now(), false)
-            view.setBigUint64(4, this.spend?.block?.idx || this.block?.idx || 0n, false)
+    index(): Txo {
+        this.events = []
+        for (const [tag, data] of Object.entries(this.data)) {
+            for (const e of data.events) {
+                const spent = this.spend ? '1' : '0'
+                const sort = this.spend?.block?.height || this.block?.height || Date.now()
+                const event = `${tag}:${e.id}:${e.value}:${spent}:${sort.toString(16).padStart(8, '0')}:${this.txid}:${this.vout}`
+                this.events.push(event)
+            }
         }
-        return this._score
+        return this
     }
 
-    toJSON() {
-        return {
-            outpoint: this.outpoint.toJSON(),
-            script: Buffer.from(this.script).toString('base64'),
-            satoshis: this.satoshis.toString(10),
-            block: this.block,
-            spend: this.spend,
-            data: this.data,
-            score: Buffer.from(this.score).toString('base64')
-        }
+    static buildQueryKey(tag: string, id: string, value?: string, spent?: boolean): string {
+        let key = `${tag}:${id}`
+        if (value) key += `:${value}` +
+           spent !== undefined ? `:${spent ? '1' : '0'}` : ''   
+        return key
     }
 
-    static fromJSON(json: any) {
-        const txo = new Txo(
-            new Outpoint(json.outpoint), 
-            Buffer.from(json.script, 'base64'), 
-            BigInt(json.satoshis)
-        )
-        txo.block = json.block
-        txo.spend = json.spend
-        txo.data = json.data
-        txo._score = Buffer.from(json.score, 'base64')
+    static fromObject(obj: any): Txo {
+        const txo = new Txo(obj.txid, obj.vout, obj.script, BigInt(obj.satoshis))
+        txo.block = obj.block
+        txo.spend = obj.spend
+        txo.data = obj.data
+        txo.events = obj.events
         return txo
+    }
+
+    toJSON(): any {
+        return {
+            txid: this.txid,
+            vout: this.vout,
+            script: Buffer.from(this.script).toString('base64'),
+            satoshis: this.satoshis.toString(),
+            block: {
+                height: this.block?.height,
+                idx: this.block?.idx.toString(),
+                hash: this.block?.hash,
+            },
+            spend: {
+                txid: this.spend?.txid,
+                vin: this.spend?.vin,
+                block: {
+                    height: this.spend?.block?.height,
+                    idx: this.spend?.block?.idx.toString(),
+                    hash: this.spend?.block?.hash,
+                },
+            
+            },
+            data: this.data,
+            events: this.events,
+        }
     }
 }

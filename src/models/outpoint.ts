@@ -1,18 +1,22 @@
-
+import { Buffer } from 'buffer';
 export class Outpoint {
     txid: Uint8Array;
     vout: number;
 
-    constructor(outpoint: string | Uint8Array) {
-        if (typeof outpoint === 'string') {
-            const [txid, vout] = outpoint.split("_");
-            this.txid = Buffer.from(txid, 'hex').reverse();
-            this.vout = parseInt(vout, 10)
-        } else {
-            this.txid = outpoint.slice(0, 32);
-            const view = new DataView(outpoint.buffer);
-            this.vout = view.getUint32(32, true);
+    constructor(txidOrOutpoint: string | Uint8Array, vout?: number) {
+        var buf = typeof txidOrOutpoint == 'string'
+            ? new Uint8Array(Buffer.from(txidOrOutpoint, 'hex'))
+            : txidOrOutpoint;
+
+        if (vout !== undefined) {
+            this.txid = buf;
+            this.vout = vout;
+            return;
         }
+
+        this.txid = buf.slice(0, 32);
+        const view = new DataView(buf.buffer);
+        this.vout = view.getUint32(32, true);
     }
 
     toString(): string {
@@ -36,6 +40,13 @@ export class Outpoint {
 
     static fromJSON(json: string) {
         return new Outpoint(json);
+    }
+
+    static fromProperties(txid: string | Uint8Array, vout: number) {
+        if (typeof txid === 'string') {
+            txid = Buffer.from(txid, 'hex');
+        }
+        return new Outpoint(txid);
     }
 
 }

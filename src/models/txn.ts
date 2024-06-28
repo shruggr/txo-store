@@ -9,7 +9,8 @@ export enum TxnStatus {
 
 export interface Txn {
     txid: string
+    rawtx: Uint8Array
+    proof: Uint8Array
     block?: Block
     status: TxnStatus
-    score: number
 }

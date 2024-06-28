@@ -1,6 +1,6 @@
-import type { Output, Storage } from "@bsv/overlay";
-import type { AppliedTransaction } from "@bsv/overlay/storage/Storage";
-import { openDB, type DBSchema, type IDBPDatabase } from "idb";
+import type { Output, Storage, AppliedTransaction } from "@bsv/overlay";
+import { openDB, type DBSchema, type IDBPDatabase } from "@tempfix/idb";
+import type { Txn } from "../../models/txn";
 
 export interface TxoSchema extends DBSchema {
     txos: {
@@ -9,6 +9,10 @@ export interface TxoSchema extends DBSchema {
         indexes: {
             byTxid: string;
         }
+    }
+    txns: {
+        key: string;
+        value: Txn;
     }
     appliedTxs: {
         key: [string, string];
@@ -26,7 +30,7 @@ export class TxoStorage implements Storage {
             upgrade(db) {
                 const txos = db.createObjectStore('txos', { keyPath: ['txid', 'outputIndex'] })
                 txos.createIndex('byTxid', 'txid')
-                const appliedTxs = db.createObjectStore('appliedTxs', { keyPath: ['topic', 'txid'] })
+                db.createObjectStore('appliedTxs', { keyPath: ['topic', 'txid'] })
             }
         })
     }

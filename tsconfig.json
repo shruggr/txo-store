@@ -11,7 +11,6 @@
     // Bundler mode
     "moduleResolution": "bundler",
     "verbatimModuleSyntax": true,
-    "noEmit": true,
 
     // Best practices
     "strict": true,
@@ -24,7 +23,7 @@
     "noPropertyAccessFromIndexSignature": false,
     "allowSyntheticDefaultImports": true,
 
-    "outDir": "dist",
+    "outDir": "dist"
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts"]
 }
