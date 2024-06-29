@@ -1,7 +1,7 @@
-import type { Outpoint } from "./outpoint";
-
-export interface Origin {
-    outpoint: Outpoint
-    nonce: number
-    map?: {[key: string]: any}
+export class Origin {
+    constructor(
+        public outpoint: string, 
+        public nonce: number, 
+        public data: {[key: string]: any} = {}
+    ) {}
 }

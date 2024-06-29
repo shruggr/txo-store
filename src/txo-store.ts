@@ -5,7 +5,10 @@ import { openDB, type DBSchema, type IDBPDatabase } from "@tempfix/idb";
 import { Txo, TxoLookup, type TxoResults } from "./models/txo";
 import { TxnStatus, type Txn } from "./models/txn";
 import { BlockHeaderService } from "./block-headers";
-import type { Block } from "./models/block";
+import { Block } from "./models/block";
+import { Spend } from "./models/spend";
+import { Buffer } from 'buffer'
+import { parseAddress } from "./models/address";
 
 const VERSION = 1
 
@@ -30,7 +33,9 @@ export class TxoStore {
     constructor(
         public accountId: string,
         public indexers: Indexer[] = [],
+        public addresses = new Set<string>()
     ) {
+        this.indexers.forEach(i => i.addresses = this.addresses)
         this.db = openDB<TxoSchema>(`txostore-${accountId}`, VERSION, {
             upgrade(db) {
                 const txos = db.createObjectStore('txos', { keyPath: ['txid', 'vout'] })
@@ -62,10 +67,10 @@ export class TxoStore {
             txid,
             rawtx: new Uint8Array(rawtx),
             proof: new Uint8Array(proof),
-            block: {
-                height: tx.merklePath.blockHeight,
-                idx: BigInt(tx.merklePath.path[0].find(p => p.hash == txid)?.offset || 0)
-            },
+            block: new Block(
+                tx.merklePath.blockHeight,
+                BigInt(tx.merklePath.path[0].find(p => p.hash == txid)?.offset || 0)
+            ),
             status: TxnStatus.CONFIRMED,
         }
         await (await this.db).put('txns', txn)
@@ -76,20 +81,26 @@ export class TxoStore {
         return (await this.db).get('txos', [txid, vout])
     }
 
-    async findTxos(lookup: TxoLookup, limit = 100, from?: string): Promise<TxoResults> {
+    async searchTxos(lookup: TxoLookup, limit = 10, from?: string): Promise<TxoResults> {
         const db = await this.db
         let dbkey = lookup.toQueryKey()
         const start = from || dbkey
         const query: IDBKeyRange = IDBKeyRange.bound(start, dbkey + '\uffff', true, false)
         const results: TxoResults = { txos: [] }
+        console.time('findTxos')
         for await (const cursor of db.transaction('txos').store.index('events').iterate(query)) {
-            const txo = Txo.fromObject(cursor.value)
+            const txo = Txo.fromObject(cursor.value, this.indexers)
             results.nextPage = cursor.key
             if (lookup.owner && txo.owner != lookup.owner) continue
             results.txos.push(txo)
-            if (results.txos.length >= limit) return results
+            console.timeLog('findTxos', txo.txid, txo.vout)
+            if (results.txos.length >= limit) {
+                console.timeEnd('findTxos')
+                return results
+            }
         }
         delete results.nextPage
+        console.timeEnd('findTxos')
         return results
     }
 
@@ -104,7 +115,7 @@ export class TxoStore {
             const idx = tx.merklePath.path[0].find(p => p.hash == txHash)?.offset || 0
             block.height = tx.merklePath.blockHeight
             block.idx = BigInt(idx)
-            block.hash = await this.blocks.getHashByHeight(tx.merklePath.blockHeight)
+            block.hash = (await this.blocks.getHashByHeight(tx.merklePath.blockHeight)) || ''
         }
 
         const ctx: IndexContext = {
@@ -132,29 +143,38 @@ export class TxoStore {
         for await (const [vin, input] of tx.inputs.entries()) {
             let data = await t.store.get([input.sourceTXID!, input.sourceOutputIndex])
             const spend = data ?
-                Txo.fromObject(data) :
+                Txo.fromObject(data, this.indexers) :
                 new Txo(
-                    txid,
+                    input.sourceTXID!,
                     input.sourceOutputIndex,
-                    new Uint8Array(input.sourceTransaction!.outputs[input.sourceOutputIndex]!.lockingScript.toBinary()),
+                    Buffer.from(input.sourceTransaction!.outputs[input.sourceOutputIndex]!.lockingScript.toBinary()),
                     BigInt(input.sourceTransaction!.outputs[input.sourceOutputIndex]!.satoshis!)
                 )
 
-            spend.spend = { txid, vin, block }
+            spend.spend = new Spend(txid, vin, block)
             ctx.spends.push(spend)
             t.store.put(spend)
         }
 
         for await (const [vout, output] of tx.outputs.entries()) {
             let data = await t.store.get([txid, vout])
-            let txo = data ?
-                Txo.fromObject(data) :
-                new Txo(
-                    txid,
-                    vout,
-                    new Uint8Array(output.lockingScript.toBinary()),
-                    BigInt(output.satoshis!)
-                )
+            let txo: Txo
+            if(data) {
+                txo = Txo.fromObject(data)
+            } else {
+                const script = output.lockingScript.toBinary()
+                // console.log('script', output.lockingScript.toBinary())
+                txo = new Txo(
+                   txid,
+                   vout,
+                   new Uint8Array(script),
+                   BigInt(output.satoshis!)
+               )
+            }
+            if(!txo.owner) {
+                txo.owner = parseAddress(output.lockingScript, 0)
+            }
+
             txo.block = block
             txo.events = [];
             ctx.txos.push(txo)
@@ -167,6 +187,16 @@ export class TxoStore {
         }
         this.indexers.forEach(i => i.save && i.save(ctx))
         for (const txo of ctx.txos) {
+            txo.events = []
+            const spent = txo.spend ? '1' : '0'
+            const sort = (txo.spend?.block?.height || txo.block?.height || Date.now()).toString(16).padStart(8, '0')
+            if (txo.owner && this.addresses.has(txo.owner)) {
+                Object.entries(txo.data).forEach(([tag, data]) => {
+                    data.events.forEach(e => {
+                        txo.events.push(`${tag}:${e.id}:${e.value}:${spent}:${sort}:${txo.block?.idx}:${txo.vout}:${txo.satoshis}`)
+                    })
+                })
+            }
             t.store.put(txo)
         }
         await t.done

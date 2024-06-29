@@ -1,7 +1,13 @@
-import type { Block } from "./block";
+import { Block } from "./block";
 
-export interface Spend {
-    txid: string,
-    vin: number,
-    block?: Block
+export class Spend {
+    constructor(public txid: string, public vin: number, public block?: Block) {}
+
+    toJSON() {
+        return {
+            txid: this.txid,
+            vin: this.vin,
+            block: this.block?.toJSON(),
+        }
+    }
 }

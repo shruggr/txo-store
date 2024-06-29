@@ -6,9 +6,13 @@
     </script>
 </head>
 <body>
-    <h1>Ingest Beef</h1>
+    <h2>Ingest Beef</h2>
     <input type="text" id="beef" placeholder="Enter Beef Hex">
-    <input type="button" id="ingest" value="Ingest">
+    <input type="button" id="ingestBeef" value="Ingest">
+
+    <h2>Ingest Txid</h2>
+    <input type="text" id="txid" placeholder="Enter Txid">
+    <input type="button" id="ingestTxid" value="Ingest">
 
     <h2>Import Utxos</h2>
     <input type="text" id="address" placeholder="Address">
@@ -18,8 +22,8 @@
     <input type="text" id="indexer" placeholder="Indexer">
     <input type="text" id="id" placeholder="Id">
     <input type="text" id="value" placeholder="Value">
-    <input type="checkbox" id="spent">Spent
+    <input type="checkbox" id="unspent" checked>Unpent
     <input type="button" id="search" value="Search">
-    <code id="inventory"></pre>
+    <pre id="inventory"></pre>
 </body>
 </html>

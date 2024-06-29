@@ -1,8 +1,7 @@
 import type { IndexContext } from "../models/index-context";
 import { Indexer } from "../models/indexer";
 import { IndexData } from "../models/index-data";
-import type { Origin } from "../models/origin";
-import { Outpoint } from "../models/outpoint";
+import { Origin } from "../models/origin";
 
 
 export class OriginIndexer extends Indexer {
@@ -18,33 +17,35 @@ export class OriginIndexer extends Indexer {
         }
         let inSat = 0n
         const data = new IndexData()
+        let origin: Origin | undefined
         for (const spend of ctx.spends) {
-            data.deps.add(spend.txid.toString())
-            if (inSat == outSat) {
-                let origin: Origin | undefined
-                if (spend.satoshis != 1n) {
-                    origin = {
-                        nonce: 0,
-                        outpoint: new Outpoint(txo.txid, txo.vout),
-                    }
-                } else if (spend.data['origin']) {
-                    origin = Object.assign({}, spend.data['origin'].data) as Origin
+            data.deps.add(`${spend.txid}_${spend.vout}`)
+            if (inSat == outSat && spend.satoshis != 1n) {
+                if (spend.data.origin) {
+                    origin = Object.assign({}, spend.data.origin.data) as Origin
                     origin.nonce++
                 }
-                if (origin) {
-                    if (txo.data['map']) {
-                        origin.map = Object.assign(origin.map || {}, txo.data['map'].data)
-                    }
-                    this.emit(txo, 'outpoint', origin.outpoint.toString())
-                    data.data = origin
-                    return data
-                }
-                return
+                break
             } else if (inSat > outSat) {
-                return
+                break
             }
             inSat += spend.satoshis
         }
+        if (!origin) {
+            origin = new Origin(`${txo.txid}_${txo.vout}`, 0)
+        }
+
+        if (origin) {
+            origin.data.insc = txo.data.insc?.data
+            origin.data.opns = txo.data.opns?.data
+            if(txo.data.map) {
+                origin.data.map = Object.assign(origin.data?.map || {}, txo.data.map.data)
+            }
+            data.events.push({id: 'outpoint', value: origin.outpoint})
+            data.data = origin
+            return data
+        }
+
         return
     }
 }

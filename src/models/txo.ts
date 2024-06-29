@@ -1,14 +1,15 @@
-import type { Block } from "./block"
+import { Block } from "./block"
 import { IndexData } from "./index-data"
-import type { Spend } from "./spend"
+import type { Indexer } from "./indexer"
+import { Spend } from "./spend"
 import { Buffer } from 'buffer'
 
 export class Txo {
     block?: Block
     spend?: Spend
-    owner = ''
     data: { [tag: string]: IndexData } = {}
     events: string[] = []
+    owner?: string
 
     constructor(
         public txid: string,
@@ -17,37 +18,31 @@ export class Txo {
         public satoshis: bigint
     ) { }
 
-    static fromObject(obj: any): Txo {
-        const txo = new Txo(obj.txid, obj.vout, obj.script, BigInt(obj.satoshis))
-        txo.block = obj.block
-        txo.spend = obj.spend
-        txo.data = obj.data
+    static fromObject(obj: any, indexers: Indexer[] = []): Txo {
+        const txo = new Txo(obj.txid, obj.vout, obj.script, obj.satoshis)
+        txo.block = obj.block && new Block(obj.block.height, obj.block.idx, obj.block.hash)
+        txo.spend = obj.spend && new Spend(obj.spend.txid, obj.spend.vin, obj.spend.block && new Block(obj.spend.block.height, obj.spend.block.idx, obj.spend.block.hash))
+        txo.owner = obj.owner
+        for(let idx of indexers) {
+            if (obj.data[idx.tag]) {
+                txo.data[idx.tag] = idx.fromObj(obj.data[idx.tag])
+            }
+        }
+
         txo.events = obj.events
         return txo
     }
 
-    toJSON(): any {
+    toJSON() {
         return {
-            txid: this.txid,
-            vout: this.vout,
+            ...this,
             script: Buffer.from(this.script).toString('base64'),
             satoshis: this.satoshis.toString(),
-            block: {
-                height: this.block?.height,
-                idx: this.block?.idx.toString(),
-                hash: this.block?.hash,
-            },
-            spend: {
-                txid: this.spend?.txid,
-                vin: this.spend?.vin,
-                block: {
-                    height: this.spend?.block?.height,
-                    idx: this.spend?.block?.idx.toString(),
-                    hash: this.spend?.block?.hash,
-                },
-
-            },
-            data: this.data,
+            owner: this.owner,
+            data: Object.entries(this.data).reduce((acc: {[tag:string]:any}, [tag, data]) => {
+                acc[tag] = data.data
+                return acc
+            }, {}),
             events: this.events,
         }
     }
@@ -59,8 +54,8 @@ export class TxoLookup {
         public id?: string,
         public value?: string,
         public spent?: boolean, 
-        public owner?: string) {
-    }
+        public owner?: string
+    ) { }
 
     toQueryKey(): string {
         return TxoLookup.buildQueryKey(this.indexer, this.id, this.value, this.spent)

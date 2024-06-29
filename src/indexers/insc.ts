@@ -5,26 +5,12 @@ import { IndexData } from "../models/index-data";
 import { Outpoint } from "../models/outpoint";
 import { Buffer } from 'buffer'
 import { parseAddress } from "../models/address";
+import { Inscription } from "../models/inscription";
 
 const ORD = Buffer.from('ord')
 
-export class Inscription {
-    file = {
-        hash: '',
-        size: 0,
-        type: '',
-        content: ''
-    }
-    fields: {[key: string]: any} = {}
-    parent?: Outpoint
-}
-
 export class InscriptionIndexer extends Indexer {
     tag: string = 'insc'
-
-    constructor(public addresses: Set<string>) { 
-        super()
-    }
 
     parse(ctx: IndexContext, vout: number): IndexData | undefined {
         const script = ctx.tx.outputs[vout].lockingScript
@@ -46,23 +32,15 @@ export class InscriptionIndexer extends Indexer {
         const data = new IndexData()
         data.data = insc
         const script = ctx.tx.outputs[vout].lockingScript
-        const events: {id: string, value: string}[] = []
+        // const events: { id: string, value: string }[] = []
         for (let i = fromPos; i < script.chunks.length; i += 2) {
             const field = script.chunks[i]
             if (field.op == OP.OP_ENDIF) {
-                let owner = txo.owner
-                if (!owner) {
-                    let owner = parseAddress(script, i + 1)
-                    if (!owner && script.chunks[i + 1]?.op == OP.OP_CODESEPARATOR) {
-                        owner = parseAddress(script, i + 1)
+                if (!txo.owner) {
+                    txo.owner = parseAddress(script, i + 1)
+                    if (!txo.owner && script.chunks[i + 1]?.op == OP.OP_CODESEPARATOR) {
+                        txo.owner = parseAddress(script, i + 1)
                     }
-                }
-                if (owner && this.addresses.has(owner)) {
-                    txo.owner = owner
-                    events.push({id: 'owner', value: owner})
-                }
-                for(const event of events) {
-                    this.emit(txo, event.id, event.value)
                 }
                 return data
             }
@@ -72,6 +50,7 @@ export class InscriptionIndexer extends Indexer {
             if (value.op > OP.OP_PUSHDATA4) return
 
             if (field.data?.length || 0 > 1) {
+                if (!insc.fields) insc.fields = {}
                 insc.fields[Buffer.from(field.data!).toString()] = value.data
                 continue
             }
@@ -85,31 +64,52 @@ export class InscriptionIndexer extends Indexer {
             }
             switch (fieldNo) {
                 case 0:
-                    if (!value.data?.length) return
-                    insc.file.content = Buffer.from(value.data || []).toString('base64')
                     insc.file.size = value.data?.length || 0
+                    if (!value.data?.length) break
                     insc.file.hash = Buffer.from(Hash.sha256(value.data)).toString('hex')
-                    events.push({id: 'hash', value: insc.file.hash})
+                    data.events.push({ id: 'hash', value: insc.file.hash })
+                    if (value.data?.length <= 1024) {
+                        try {
+                            insc.file.text = new TextDecoder("utf8", { fatal: true })
+                                .decode(Buffer.from(value.data))
+                            const words = new Set<string>()
+                            insc.file.text.split(' ').forEach(word => {
+                                if (word.length > 3 && word.length < 20) {
+                                    words.add(word)
+                                }
+                            })
+                            words.forEach(word => data.events.push({ id: 'word', value: word }))
+                        } catch {
+                            console.log('Error parsing text')
+                        }
+                    }
                     break
                 case 1:
                     insc.file.type = Buffer.from(value.data || []).toString()
-                    events.push({id: 'type', value: insc.file.type})
+                    data.events.push({ id: 'type', value: insc.file.type })
                     break
                 case 3:
                     try {
                         const parent = new Outpoint(new Uint8Array(value.data || []))
                         if (!ctx.spends.find(s => s.txid == parent.txidString() && s.vout == parent.vout)) continue
-                        insc.parent = parent
-                        events.push({id: 'parent', value: parent.toString()})
+                        insc.parent = parent.toString()
+                        data.events.push({ id: 'parent', value: parent.toString() })
                     } catch {
                         console.log('Error parsing parent outpoint')
                     }
                     break
                 default:
-                    insc.fields[fieldNo.toString()] = value.data
+                    if (!insc.fields) insc.fields = {}
+                    insc.fields[fieldNo.toString()] = value.data && Buffer.from(value.data).toString('base64')
             }
 
         }
         return
+    }
+
+    fromObj(obj: IndexData): IndexData {
+        const insc = new Inscription()
+        Object.assign(insc, obj.data)
+        return new IndexData(insc, obj.deps)
     }
 }
