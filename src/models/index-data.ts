@@ -5,7 +5,7 @@ export class IndexData {
     
     constructor(
         public data?: any,
-        public deps = new Set<string>(),
+        public deps: string[] = [],
         public events: Event[] = []
         // public owner?: string,
     ) {}

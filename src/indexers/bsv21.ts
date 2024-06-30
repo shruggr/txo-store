@@ -4,7 +4,6 @@ import { IndexData } from "../models/index-data";
 import { Indexer } from "../models/indexer";
 import type { Inscription } from "../models/inscription";
 import type { Txo } from "../models/txo";
-import { Buffer } from 'buffer'
 
 export class Bsv21Indexer extends Indexer {
     tag: string = 'bsv21'
@@ -41,40 +40,53 @@ export class Bsv21Indexer extends Indexer {
     }
 
     save(ctx: IndexContext) {
-        let tokensIn = 0n
-        let token: IndexData | undefined
-        const deps = new Set<string>()
+        const balance: {[id: string]: bigint} = {}
+        const tokensIn: {[id: string]: Txo[]} = {}
         for (const spend of ctx.spends) {
             const bsv21 = spend.data.bsv21
             if (!bsv21) continue
             if (bsv21.data.status == Bsv21Status.Valid) {
-                token = bsv21
-                tokensIn += BigInt(bsv21.data.amt)
-                deps.add(`${spend.txid}_${spend.vout}`)
+                if (!tokensIn[bsv21.data.id]) {
+                    tokensIn[bsv21.data.id] = []
+                }
+                tokensIn[bsv21.data.id].push(spend)
+                balance[bsv21.data!.id] = (balance[bsv21.data!.id] || 0n) + bsv21.data.amt
             }
         }
-        const tokens: Txo[] = []
-        let reason = ""
+        const tokensOut: {[id: string]: Txo[]} = {}
+        const reasons: {[id: string]: string} = {}
         for (const txo of ctx.txos) {
             const bsv21 = txo.data?.bsv21
             if (!bsv21 || !['transfer', 'burn'].includes(bsv21.data.op)) continue
-
-            if (tokensIn >= bsv21.data.amt) {
-                bsv21.data.status = Bsv21Status.Valid
-            } else {
-                reason = 'Insufficient tokens'
+            let token: Bsv21 | undefined
+            for (const spend of tokensIn[bsv21.data.id]) {
+                token = spend.data.bsv21.data
+                bsv21.deps.push(`${spend.txid}_${spend.vout}`)
             }
-            txo.data.bsv21.deps = deps
-            tokens.push(txo)
-            tokensIn -= BigInt(bsv21.data.amt)
+            if ((balance[bsv21.data.id] || 0n) < bsv21.data.amt) {
+                reasons[bsv21.data.id] = 'Insufficient inputs'    
+            }
+
+            if (token) {
+                bsv21.data.sym = token.sym
+                bsv21.data.icon = token.icon
+                bsv21.data.contract = token.contract
+            }
+
+            if (!tokensOut[bsv21.data.id]) {
+                tokensOut[bsv21.data.id] = []
+            }
+            tokensOut[bsv21.data.id].push(txo)
+            balance[bsv21.data.id] = (balance[bsv21.data.id] || 0n) - BigInt(bsv21.data.amt)
         }
 
-        for (const txo of tokens) {
-            txo.data.bsv21.data.sym = token?.data.sym
-            txo.data.bsv21.data.icon = token?.data.icon
-            txo.data.bsv21.data.contract = token?.data.contract
-            txo.data.bsv21.data.status = reason ? Bsv21Status.Invalid : Bsv21Status.Valid
-            txo.data.bsv21.data.reason = reason
+
+        for (const [id, txos] of Object.entries(tokensOut)) {
+            const reason = reasons[id]
+            for (const txo of txos) {
+                txo.data.bsv21.data.status = reason ? Bsv21Status.Invalid : Bsv21Status.Valid
+                txo.data.bsv21.data.reason = reason
+            }
         }
     }
 

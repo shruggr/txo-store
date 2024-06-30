@@ -1,6 +1,6 @@
 import {OP, Utils, type Script} from "@bsv/sdk";
 
-export function parseAddress(script: Script, offset: number = 0): string | undefined {
+export function parseAddress(script: Script, offset: number = 0): string {
     if (script.chunks[0 + offset]?.op === OP.OP_DUP &&
         script.chunks[1 + offset]?.op === OP.OP_HASH160 &&
         script.chunks[2 + offset]?.data?.length === 20 &&
@@ -9,4 +9,5 @@ export function parseAddress(script: Script, offset: number = 0): string | undef
     ) {
         return Utils.toBase58Check(script.chunks[2 + offset].data!, [0])
     }
+    return ""
 }

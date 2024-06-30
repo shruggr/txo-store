@@ -19,6 +19,7 @@ export class Bsv20Indexer extends Indexer {
             switch (bsv20.op) {
                 case 'deploy':
                     if (bsv20.dec || 0 > 18) return
+                    break
                 case 'mint':
                 case 'transfer':
                 case 'burn':

@@ -9,13 +9,13 @@ export class Txo {
     spend?: Spend
     data: { [tag: string]: IndexData } = {}
     events: string[] = []
-    owner?: string
+    owner = ''
 
     constructor(
         public txid: string,
         public vout: number,
+        public satoshis: bigint,
         public script: Uint8Array,
-        public satoshis: bigint
     ) { }
 
     static fromObject(obj: any, indexers: Indexer[] = []): Txo {

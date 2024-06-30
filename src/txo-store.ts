@@ -147,8 +147,8 @@ export class TxoStore {
                 new Txo(
                     input.sourceTXID!,
                     input.sourceOutputIndex,
+                    BigInt(input.sourceTransaction!.outputs[input.sourceOutputIndex]!.satoshis!),
                     Buffer.from(input.sourceTransaction!.outputs[input.sourceOutputIndex]!.lockingScript.toBinary()),
-                    BigInt(input.sourceTransaction!.outputs[input.sourceOutputIndex]!.satoshis!)
                 )
 
             spend.spend = new Spend(txid, vin, block)
@@ -167,8 +167,8 @@ export class TxoStore {
                 txo = new Txo(
                    txid,
                    vout,
+                   BigInt(output.satoshis!),
                    new Uint8Array(script),
-                   BigInt(output.satoshis!)
                )
             }
             if(!txo.owner) {
