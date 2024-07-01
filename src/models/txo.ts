@@ -19,7 +19,7 @@ export class Txo {
     ) { }
 
     static fromObject(obj: any, indexers: Indexer[] = []): Txo {
-        const txo = new Txo(obj.txid, obj.vout, obj.script, obj.satoshis)
+        const txo = new Txo(obj.txid, obj.vout, obj.satoshis, obj.script)
         txo.block = obj.block && new Block(obj.block.height, obj.block.idx, obj.block.hash)
         txo.spend = obj.spend && new Spend(obj.spend.txid, obj.spend.vin, obj.spend.block && new Block(obj.spend.block.height, obj.spend.block.idx, obj.spend.block.hash))
         txo.owner = obj.owner

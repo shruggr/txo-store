@@ -11,7 +11,7 @@ export class FundIndexer extends Indexer {
         const script = ctx.tx.outputs[vout].lockingScript
         const address = parseAddress(script, 0)
         if (address && txo.satoshis > 1n) {
-            return new IndexData(address)
+            return new IndexData(address, [], [{ id: 'address', value: address}])
         }
         return
     }

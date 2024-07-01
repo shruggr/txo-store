@@ -13,7 +13,7 @@ const addresses = new Set<string>(['13AGuUcJKJm5JaT9qssFxK8DETo3tAaa66', '1FDHUk
 
 const indexers = [
     new FundIndexer(),
-    new OrdLockIndexer(),
+    // new OrdLockIndexer(),
     new InscriptionIndexer(),
     new Bsv21Indexer(),
     new Bsv20Indexer(),

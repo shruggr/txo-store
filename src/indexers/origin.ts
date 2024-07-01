@@ -19,7 +19,7 @@ export class OriginIndexer extends Indexer {
         const data = new IndexData()
         let origin: Origin | undefined
         for (const spend of ctx.spends) {
-            data.deps.add(`${spend.txid}_${spend.vout}`)
+            data.deps.push(`${spend.txid}_${spend.vout}`)
             if (inSat == outSat && spend.satoshis == 1n) {
                 if (spend.data.origin) {
                     origin = Object.assign({}, spend.data.origin.data) as Origin
