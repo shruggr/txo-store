@@ -1,14 +1,19 @@
 {
-  "name": "spv-store",
-  "main": "dist/index.js",
+  "name": "txo-store",
+  "main": "dist/index.cjs",
+  "type": "module",
+  "source": "src/index.ts",
+  "module": "./dist/index.module.js",
+  "unpkg": "./dist/index.umd.js",
   "scripts": {
-    "dev": "webpack-dev-server --mode development",
-    "build": "webpack --mode production"
+    "build": "microbundle",
+    "dev": "microbundle watch"
   },
   "devDependencies": {
     "@rollup/plugin-node-resolve": "^15.2.3",
     "@rollup/plugin-typescript": "^11.1.6",
     "html-webpack-plugin": "^5.6.0",
+    "microbundle": "^0.15.1",
     "rollup": "^2.79.1",
     "rollup-plugin-polyfill-node": "^0.13.0",
     "rollup-plugin-sourcemaps": "^0.6.3",

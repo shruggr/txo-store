@@ -1,29 +1,21 @@
 {
-  "compilerOptions": {
-    // Enable latest features
-    "lib": ["ESNext", "DOM"],
-    "target": "ESNext",
-    "module": "ESNext",
-    "moduleDetection": "force",
-    "allowJs": true,
-    "declaration": true,
-
-    // Bundler mode
-    "moduleResolution": "bundler",
-    "verbatimModuleSyntax": true,
-
-    // Best practices
-    "strict": true,
-    "skipLibCheck": true,
-    "noFallthroughCasesInSwitch": true,
-
-    // Some stricter flags (disabled by default)
-    "noUnusedLocals": false,
-    "noUnusedParameters": false,
-    "noPropertyAccessFromIndexSignature": false,
-    "allowSyntheticDefaultImports": true,
-
-    "outDir": "dist"
-  },
-  "include": ["src/**/*.ts"]
-}
+    "compilerOptions": {
+      "target": "ESNext",
+      "module": "commonjs",
+      "declaration": true,
+      "outDir": "./dist",
+      "noEmit": false /* Do not emit outputs. */,
+      "strict": true,
+      "moduleResolution": "node",
+      "typeRoots": [
+        "./node_modules/@types",
+        "./types"
+      ] /* List of folders to include type definitions from. */,
+      "esModuleInterop": true,
+      /* Advanced Options */
+      "skipLibCheck": true /* Skip type checking of declaration files. */,
+      "forceConsistentCasingInFileNames": true /* Disallow inconsistently-cased references to the same file. */
+    },
+    "exclude": ["node_modules", "./dist"],
+    "include": ["src/**/*"]
+  }

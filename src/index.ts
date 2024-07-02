@@ -1,140 +1,205 @@
-import { Transaction } from '@bsv/sdk';
-import { BlockHeaderService } from './block-headers';
-import { FundIndexer } from './indexers/fund';
-import { TxoStore } from './txo-store';
-import { OriginIndexer } from './indexers/origin';
-import { InscriptionIndexer } from './indexers/insc';
-import { TxoLookup } from './models/txo';
-import { OrdLockIndexer } from './indexers/ordlock';
-import { Bsv21Indexer } from './indexers/bsv21';
-import { Bsv20Indexer } from './indexers/bsv20';
+import { MerklePath, Transaction } from "@bsv/sdk";
+import type { Indexer } from "./models/indexer";
+import type { IndexContext } from "./models/index-context";
+import { openDB, type DBSchema, type IDBPDatabase } from "@tempfix/idb";
+import { Txo, TxoLookup, type TxoResults } from "./models/txo";
+import { TxnStatus, type Txn } from "./models/txn";
+import { BlockHeaderService } from "./block-headers";
+import { Block } from "./models/block";
+import { Spend } from "./models/spend";
+import { Buffer } from 'buffer'
+import { parseAddress } from "./models/address";
 
-const addresses = new Set<string>(['13AGuUcJKJm5JaT9qssFxK8DETo3tAaa66', '1FDHUkNu5QLH1XhdjJ3tpcEVSetB5QhnCZ'])
+const VERSION = 1
 
-const indexers = [
-    new FundIndexer(),
-    // new OrdLockIndexer(),
-    new InscriptionIndexer(),
-    new Bsv21Indexer(),
-    new Bsv20Indexer(),
-    new OriginIndexer(),
-]
-const store = new TxoStore('test', indexers, addresses)
-
-const blockHeaderService = new BlockHeaderService()
-blockHeaderService.syncBlocks()
-
-
-async function ingestBeef() {
-    try {
-        const beef = (document.getElementById('beef') as HTMLInputElement).value
-        if (!beef) return
-        const tx = Transaction.fromHexBEEF(beef)
-        // const valid = await tx.verify(blockHeaderService)
-        // if (!valid) {
-        //     throw new Error('Invalid beef')
-        // }
-        console.log(await store.ingest(tx, true))
-    } catch (e) {
-        console.error(e)
-    }
-}
-
-async function ingestTxid() {
-    try {
-        const txid = (document.getElementById('txid') as HTMLInputElement).value
-        if (!txid) return
-        const tx = await store.getTx(txid, true)
-        if (!tx) {
-            throw new Error('Tx not found')
+export interface TxoSchema extends DBSchema {
+    txos: {
+        key: [string, number]
+        value: Txo
+        indexes: {
+            events: string
+            owner: string
         }
-        // const valid = await tx.verify(blockHeaderService)
-        // if (!valid) {
-        //     throw new Error('Invalid beef')
-        // }
-        console.log(await store.ingest(tx, true))
-    } catch (e) {
-        console.error(e)
+    }
+    txns: {
+        key: string
+        value: Txn
     }
 }
 
-async function importAddress() {
-    const address = (document.getElementById('address') as HTMLInputElement).value
-    let resp = await fetch(`https://ordinals.gorillapool.io/api/txos/address/${address}/unspent?limit=100`);
-    const txos = await resp.json() as {outpoint: string, origin: {outpoint: string}}[];
-    for (let txo of txos) {
-        if (txo.origin) {
-            const resp = await fetch(`https://ordinals.gorillapool.io/api/inscriptions/${txo.origin.outpoint}/history?limit=100000`);
-            const txos = await resp.json() as {outpoint: string, origin: {outpoint: string}}[];
-            for await (let txo of txos) {
-                console.log("fast forward", txo.origin.outpoint, txo.outpoint)
-                const [txid] = txo.outpoint.split('_');
-                const tx = await store.getTx(txid, true);
-                await store.ingest(tx!, true);
+export class TxoStore {
+    db: Promise<IDBPDatabase<TxoSchema>>
+    blocks = new BlockHeaderService()
+    constructor(
+        public accountId: string,
+        public indexers: Indexer[] = [],
+        public addresses = new Set<string>()
+    ) {
+        this.indexers.forEach(i => i.addresses = this.addresses)
+        this.db = openDB<TxoSchema>(`txostore-${accountId}`, VERSION, {
+            upgrade(db) {
+                const txos = db.createObjectStore('txos', { keyPath: ['txid', 'vout'] })
+                txos.createIndex('events', 'events', { multiEntry: true })
+                txos.createIndex('owner', 'owner')
+                db.createObjectStore('txns', { keyPath: 'txid' })
             }
-        } else {
-            const [txid] = txo.outpoint.split('_');
-            const tx = await store.getTx(txid, true);
-            await store.ingest(tx!, true);
-        }
+        })
     }
-    resp = await fetch(`https://ordinals.gorillapool.io/api/bsv20/${address}/balance`);
-    const balance = await resp.json() as {id?: string}[];
-    for await(let token of balance) {
-        if(!token.id) continue
-        console.log("importing", token.id)
-        try {
-            resp = await fetch(`https://ordinals.gorillapool.io/api/bsv20/${address}/id/${token.id}/txids`);
-            const txids = await resp.json() as string[];
-            for await (let txid of txids) {
-                console.log("importing", token.id, txid)
-                const tx = await store.getTx(txid, true);
-                await store.ingest(tx!, true);
+
+    async getTx(txid: string, fromRemote = false): Promise<Transaction | undefined> {
+        let txn = await (await this.db).get('txns', txid)
+        if (txn) {
+            const tx = Transaction.fromBinary(Array.from(new Uint8Array(txn.rawtx)))
+            tx.merklePath = MerklePath.fromBinary(Array.from(txn.proof))
+            return tx
+        }
+        if (!fromRemote) return
+        console.log('Fetching', txid)
+        const [rawtx, proof] = await Promise.all([
+            fetch(`https://junglebus.gorillapool.io/v1/transaction/get/${txid}/bin`)
+                .then(resp => resp.arrayBuffer()),
+            fetch(`https://junglebus.gorillapool.io/v1/transaction/proof/${txid}`)
+                .then(resp => resp.arrayBuffer()),
+        ]);
+        const tx = Transaction.fromBinary(Array.from(new Uint8Array(rawtx)));
+        tx.merklePath = MerklePath.fromBinary(Array.from(new Uint8Array(proof)));
+        txn = {
+            txid,
+            rawtx: new Uint8Array(rawtx),
+            proof: new Uint8Array(proof),
+            block: new Block(
+                tx.merklePath.blockHeight,
+                BigInt(tx.merklePath.path[0].find(p => p.hash == txid)?.offset || 0)
+            ),
+            status: TxnStatus.CONFIRMED,
+        }
+        await (await this.db).put('txns', txn)
+        return tx
+    }
+
+    async getTxo(txid: string, vout: number): Promise<Txo | undefined> {
+        return (await this.db).get('txos', [txid, vout])
+    }
+
+    async searchTxos(lookup: TxoLookup, limit = 10, from?: string): Promise<TxoResults> {
+        const db = await this.db
+        let dbkey = lookup.toQueryKey()
+        const start = from || dbkey
+        const query: IDBKeyRange = IDBKeyRange.bound(start, dbkey + '\uffff', true, false)
+        const results: TxoResults = { txos: [] }
+        console.time('findTxos')
+        for await (const cursor of db.transaction('txos').store.index('events').iterate(query)) {
+            const txo = Txo.fromObject(cursor.value, this.indexers)
+            results.nextPage = cursor.key
+            if (lookup.owner && txo.owner != lookup.owner) continue
+            results.txos.push(txo)
+            console.timeLog('findTxos', txo.txid, txo.vout)
+            if (results.txos.length >= limit) {
+                console.timeEnd('findTxos')
+                return results
             }
-        } catch (e) {
-            console.error(e)
         }
+        delete results.nextPage
+        console.timeEnd('findTxos')
+        return results
     }
 
-    console.log('done importing')
-}
-
-async function crawlBsv21(id: string, txid: string, descentants: string[] = [], queued?: Set<string>): Promise<string[]>{
-    if(!queued) {
-        queued = new Set<string>();
-    } else if(queued.has(txid)) {
-        return descentants
-    }
-    descentants.unshift(txid);
-    queued.add(txid);
-
-    if(!id.startsWith(txid)) {
-        console.log("find parents", id, txid)
-        const resp = await fetch(`https://ordinals.gorillapool.io/api/bsv20/spends/${txid}`);
-        const txos = await resp.json() as {txid: string, id: string}[];
-        for await(let txo of txos) {
-            if(txo.id != id) continue;
-            if(queued.has(txo.txid)) continue;
-            descentants = await crawlBsv21(id, txo.txid, descentants, queued);
+    async ingest(tx: Transaction, fromRemote = false): Promise<IndexContext> {
+        const txid = tx.id('hex') as string
+        let block = {
+            height: Date.now(),
+            idx: 0n
+        } as Block
+        if (tx.merklePath) {
+            const txHash = tx.hash('hex')
+            const idx = tx.merklePath.path[0].find(p => p.hash == txHash)?.offset || 0
+            block.height = tx.merklePath.blockHeight
+            block.idx = BigInt(idx)
+            block.hash = (await this.blocks.getHashByHeight(tx.merklePath.blockHeight)) || ''
         }
+
+        const ctx: IndexContext = {
+            txid,
+            tx,
+            block,
+            spends: [],
+            txos: [],
+        }
+
+        for (const input of tx.inputs) {
+            if (!input.sourceTXID) input.sourceTXID = input.sourceTransaction!.id('hex') as string
+            if (input.sourceTransaction) {
+                if (await (await this.db).getKey('txns', input.sourceTXID)) {
+                    continue
+                }
+                await this.ingest(input.sourceTransaction)
+            } else {
+                input.sourceTransaction = await this.getTx(input.sourceTXID!, fromRemote)
+                if (!input.sourceTransaction) throw new Error(`Failed to get source tx ${input.sourceTXID!}`)
+            }
+        }
+
+        const t = (await this.db).transaction('txos', 'readwrite')
+        for await (const [vin, input] of tx.inputs.entries()) {
+            let data = await t.store.get([input.sourceTXID!, input.sourceOutputIndex])
+            const spend = data ?
+                Txo.fromObject(data, this.indexers) :
+                new Txo(
+                    input.sourceTXID!,
+                    input.sourceOutputIndex,
+                    BigInt(input.sourceTransaction!.outputs[input.sourceOutputIndex]!.satoshis!),
+                    Buffer.from(input.sourceTransaction!.outputs[input.sourceOutputIndex]!.lockingScript.toBinary()),
+                )
+
+            spend.spend = new Spend(txid, vin, block)
+            ctx.spends.push(spend)
+            t.store.put(spend)
+        }
+
+        for await (const [vout, output] of tx.outputs.entries()) {
+            let data = await t.store.get([txid, vout])
+            let txo: Txo
+            if(data) {
+                txo = Txo.fromObject(data)
+            } else {
+                const script = output.lockingScript.toBinary()
+                // console.log('script', output.lockingScript.toBinary())
+                txo = new Txo(
+                   txid,
+                   vout,
+                   BigInt(output.satoshis!),
+                   new Uint8Array(script),
+               )
+            }
+            if(!txo.owner) {
+                txo.owner = parseAddress(output.lockingScript, 0)
+            }
+
+            txo.block = block
+            txo.events = [];
+            ctx.txos.push(txo)
+            this.indexers.forEach(i => {
+                const data = i.parse && i.parse(ctx, vout)
+                if (data) {
+                    txo.data[i.tag] = data
+                }
+            })
+        }
+        this.indexers.forEach(i => i.save && i.save(ctx))
+        for (const txo of ctx.txos) {
+            txo.events = []
+            const spent = txo.spend ? '1' : '0'
+            const sort = (txo.spend?.block?.height || txo.block?.height || Date.now()).toString(16).padStart(8, '0')
+            if (txo.owner && this.addresses.has(txo.owner)) {
+                Object.entries(txo.data).forEach(([tag, data]) => {
+                    data.events.forEach(e => {
+                        txo.events.push(`${tag}:${e.id}:${e.value}:${spent}:${sort}:${txo.block?.idx}:${txo.vout}:${txo.satoshis}`)
+                    })
+                })
+            }
+            t.store.put(txo)
+        }
+        await t.done
+        return ctx
     }
-    return descentants;
-}
-
-async function search() {
-    const indexer = (document.getElementById('indexer') as HTMLInputElement).value
-    const id = (document.getElementById('id') as HTMLInputElement).value
-    const value = (document.getElementById('value') as HTMLInputElement).value
-    const spent = (document.getElementById('unspent') as HTMLInputElement).checked ? false : undefined
-    const results = await store.searchTxos(new TxoLookup(indexer, id, value, spent));
-
-    (document.getElementById('inventory') as HTMLDivElement).innerHTML = 
-        JSON.stringify(results.txos, null, 2)
-}
-
-window.onload = function() {
-    (document.getElementById('ingestBeef') as HTMLButtonElement).onclick = ingestBeef;
-    (document.getElementById('ingestTxid') as HTMLButtonElement).onclick = ingestTxid;
-    (document.getElementById('import') as HTMLButtonElement).onclick = importAddress;
-    (document.getElementById('search') as HTMLButtonElement).onclick = search;
 }
