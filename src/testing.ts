@@ -1,19 +1,19 @@
 import { Transaction } from '@bsv/sdk';
 import { BlockHeaderService } from './block-headers';
-import { FundIndexer } from './indexers/fund';
+import { FundIndexer } from './mods/fund';
 import { TxoStore } from '.';
-import { OriginIndexer } from './indexers/origin';
-import { InscriptionIndexer } from './indexers/insc';
+import { OriginIndexer } from './mods/origin';
+import { InscriptionIndexer } from './mods/insc';
 import { TxoLookup } from './models/txo';
-import { OrdLockIndexer } from './indexers/ordlock';
-import { Bsv21Indexer } from './indexers/bsv21';
-import { Bsv20Indexer } from './indexers/bsv20';
+import { OrdLockIndexer } from './mods/ordlock';
+import { Bsv21Indexer } from './mods/bsv21';
+import { Bsv20Indexer } from './mods/bsv20';
 
 const addresses = new Set<string>(['13AGuUcJKJm5JaT9qssFxK8DETo3tAaa66', '1FDHUkNu5QLH1XhdjJ3tpcEVSetB5QhnCZ'])
 
 const indexers = [
     new FundIndexer(),
-    // new OrdLockIndexer(),
+    new OrdLockIndexer(),
     new InscriptionIndexer(),
     new Bsv21Indexer(),
     new Bsv20Indexer(),

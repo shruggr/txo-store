@@ -1,4 +1,4 @@
-import { MerklePath, Transaction } from "@bsv/sdk";
+import { Broadcaster, MerklePath, Transaction } from "@bsv/sdk";
 import type { Indexer } from "./models/indexer";
 import type { IndexContext } from "./models/index-context";
 import { openDB, type DBSchema, type IDBPDatabase } from "@tempfix/idb";
@@ -33,7 +33,8 @@ export class TxoStore {
     constructor(
         public accountId: string,
         public indexers: Indexer[] = [],
-        public addresses = new Set<string>()
+        public addresses = new Set<string>(),
+        public broadcaster?: Broadcaster
     ) {
         this.indexers.forEach(i => i.addresses = this.addresses)
         this.db = openDB<TxoSchema>(`txostore-${accountId}`, VERSION, {
@@ -102,6 +103,15 @@ export class TxoStore {
         delete results.nextPage
         console.timeEnd('findTxos')
         return results
+    }
+
+    async broadcast(tx: Transaction) {
+        if (!this.broadcaster) throw new Error('No broadcaster configured')
+        const resp = await this.broadcaster.broadcast(tx)
+        if (resp.status == 'success') {
+            await this.ingest(tx)
+        }
+        return resp
     }
 
     async ingest(tx: Transaction, fromRemote = false): Promise<IndexContext> {
